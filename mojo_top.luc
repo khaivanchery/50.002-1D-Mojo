@@ -1,0 +1,462 @@
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,       // AVR RX buffer full
+    input io_dip [3][8],
+    output io_led[3][8],
+    input io_button[5]
+    
+  ) {
+  
+  sig rst;                  // reset signal
+  sig button;
+  
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    reset_conditioner resetter;
+    reset_conditioner re;
+    edge_detector butt(#RISE(1), #FALL(0));
+    edge_detector but;
+    .rst(rst){
+      fsm automatic(#INIT(ADD))={IDLE, ADD, SUB, MUL, DIV, MOD, AVG, NZEROS, NONES, CMPEQ, CMPLT, CMPLE, SHL, SHR, SRA, BINZ, BINONE, AND, OR, XOR, A, B, XNOR, NAND, NOR, AEQB, NA, NB, MANUAL, ERROR};
+      //fsm modeSelector={MANUAL, AUTO};
+      dff getA[16];
+      dff getB[16];
+      dff opcode[6];
+      dff delayer[28];
+      dff modeSelector[1]; 
+      
+      sixteenbitregister reg;
+    }
+  }
+
+  alu alu;
+  
+  
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    resetter.in = ~io_button[0]; // input raw inverted reset signal
+    butt.in = resetter.out;   // conditioned reset
+    re.in = io_button[1];
+    but.in = re.out;
+    button = but.out;
+    
+    reg.en = button;
+    reg.in[15:8] = io_dip[1];
+    reg.in[7:0] = io_dip[0];    
+    
+    led = 8h00;             // turn LEDs off
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+    io_led[0] = 8h0;
+    io_led[1] = 8h0;
+    io_led[2] = 8h0;
+    modeSelector.d = 0;
+    
+    alu.a = getA.q;
+    alu.b = getB.q;
+    alu.alufn = opcode.q;
+    
+    if (butt.out){
+      modeSelector.d = modeSelector.q + 1;}
+    else{
+      modeSelector.d = modeSelector.q ;
+      }
+      
+    
+    
+    if(modeSelector.q == 1){
+      alu.a = 16h4;
+      alu.b = 16h2;
+      
+      // test if youre here
+      //io_led = 3x{{8hF}};
+      
+      case(automatic.q){
+        automatic.IDLE:
+          alu.alufn = 6h0;
+          io_led = 3 x{{8h0}};          
+        
+        automatic.ADD:
+          alu.alufn = 6b000000;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000000;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.SUB; 
+            io_led = 3x{{8h0}}; 
+          }
+          
+        automatic.SUB:
+          alu.alufn = 6b000001;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000001;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.MUL;
+            io_led = 3x{{8h0}};  
+          }
+        
+        automatic.MUL:
+          alu.alufn = 6b000010;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000010;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.DIV;
+            io_led = 3x{{8h0}};  
+          }
+        
+        automatic.DIV:
+          alu.alufn = 6b000011;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000011;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.MOD;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.MOD:
+          alu.alufn = 6b000100;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000100;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.AVG;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.AVG:
+          alu.alufn = 6b000101;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000101;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NZEROS;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.NZEROS:
+          alu.alufn = 6b000110;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000110;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NONES;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.NONES:
+          alu.alufn = 6b000111;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000111;
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.CMPEQ;
+            io_led = 3x{{8h0}};  
+          }
+              
+        automatic.CMPEQ:
+          alu.alufn = 6b000010;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000010;
+             
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.CMPLT;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.CMPLT:
+          alu.alufn = 6b000100;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000100;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.CMPLE;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.CMPLE:
+          alu.alufn = 6b000110;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b000110;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.SHL;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.SHL:
+          alu.alufn = 6b100000;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b100000;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.SHR;
+            io_led = 3x{{8h0}};  
+          }
+          
+        automatic.SHR:
+          alu.alufn = 6b100001;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b100001;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.SRA;
+            io_led = 3x{{8h0}};  
+          }    
+                
+        automatic.SRA:
+          alu.alufn = 6b100011;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b100011;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.BINZ;
+            io_led = 3x{{8h0}};  
+          }
+        automatic.BINZ:
+          alu.alufn = 6b010000;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b010000;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.BINONE;
+            io_led = 3x{{8h0}};  
+          }
+        automatic.BINONE:
+          alu.alufn = 6b010010;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+                    io_led[2] = 6b010010;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.AND;
+            io_led = 3x{{8h0}};  
+          }                 
+          
+        automatic.AND:
+          alu.alufn = 6b011000;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011000;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.OR;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.OR:
+          alu.alufn = 6b011110;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011110;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.XOR;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.XOR:
+          alu.alufn = 6b010110;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b010110;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.A;
+            io_led = 3x{{8h0}};  
+          }          
+
+        automatic.A:
+          alu.alufn = 6b011010;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011010;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.B;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.B:
+          alu.alufn = 6b011100;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011100;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.XNOR;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.XNOR:
+          alu.alufn = 6b011001;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011001;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NAND;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.NAND:
+          alu.alufn = 6b011101;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011101;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NOR;
+            io_led = 3x{{8h0}};  
+          }
+                    
+        automatic.NOR:
+          alu.alufn = 6b011111;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b011111;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.AEQB;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.AEQB:
+          alu.alufn = 6b010011;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b010011;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NA;
+            io_led = 3x{{8h0}};  
+          }          
+                    
+        automatic.NA:
+          alu.alufn = 6b010001;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b010001;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.NB;
+            io_led = 3x{{8h0}};  
+          }          
+          
+        automatic.NB:
+          alu.alufn = 6b010101;
+          io_led[0] = alu.alu[7:0];
+          io_led[1] = alu.alu[15:8];
+          io_led[2] = 6b010101;
+
+          delayer.d = delayer.q + 1;
+          if(delayer.q[27] == 1){
+            delayer.d[27] = delayer.q[27] + 1;
+            automatic.d = automatic.MANUAL;
+            io_led = 3x{{8h0}};  
+          }          
+ 
+        automatic.MANUAL:
+          io_led[2] = 8x{hF};
+          delayer.d[27] = delayer.q[27] + 1;
+          automatic.d = automatic.IDLE;
+                                               
+      }
+       
+      
+    } 
+        else{
+        alu.alufn = io_dip[2][5:0];
+        led = 8h00;
+        alu.a[7:0]= reg.out[7:0];
+        alu.a[15:8] = reg.out[15:8];
+        alu.b[7:0]= io_dip[0];
+        alu.b[15:8] = io_dip[1];
+
+        io_led[2]=0;
+        io_led[0]=alu.alu[7:0];
+        io_led[1]=alu.alu[15:8];
+
+        led=alu.error;        
+        }
+    
+  }
+ 
+  
+}
